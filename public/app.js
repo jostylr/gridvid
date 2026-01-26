@@ -149,31 +149,57 @@ class FileBrowser {
 
         // Search Logic
         if (this.searchTerm && this.searchTerm.length >= 3 && window.fullCatalog) {
-            const normalize = (str) => str.replace(/[^a-z0-9]/g, "");
-            const cleanSearch = normalize(this.searchTerm);
+            // 1. Prepare search terms
+            // Split by space, normalize each token
+            const normalize = (str) => str.replace(/[^a-z0-9]/g, ""); // Lowercase handling is done via oninput or here? oninput does toLowerCase
+            // oninput sets this.searchTerm to lowercase.
 
-            // Check Cache
-            if (this.searchCache[cleanSearch]) {
-                filesToRender = this.searchCache[cleanSearch];
+            const rawTerms = this.searchTerm.split(/\s+/);
+            const terms = rawTerms.map(t => normalize(t)).filter(t => t.length > 0);
+
+            if (terms.length === 0) {
+                // e.g. "   "
+                filesToRender = this.allFiles;
             } else {
-                // Refine
-                let sourceList = window.fullCatalog;
+                const currentCacheKey = terms.join("|"); // Key based on normalized tokens
 
-                // If extension of last search, use that result as source
-                if (this.lastCleanSearch && cleanSearch.startsWith(this.lastCleanSearch) && this.searchCache[this.lastCleanSearch]) {
-                    sourceList = this.searchCache[this.lastCleanSearch];
+                // Check Cache
+                if (this.searchCache[currentCacheKey]) {
+                    filesToRender = this.searchCache[currentCacheKey];
+                } else {
+                    // Refine from previous search
+                    let sourceList = window.fullCatalog;
+
+                    // Simple Refinement Strategy:
+                    // If currentKey starts with lastKey (e.g. "indi|crus" starts with "indi"), 
+                    // we can filter the subset.
+                    // Note: "indi|crus".startsWith("indi") is true.
+                    // "indiana".startsWith("indi") is true.
+
+                    if (this.lastCleanSearch && currentCacheKey.startsWith(this.lastCleanSearch) && this.searchCache[this.lastCleanSearch]) {
+                        sourceList = this.searchCache[this.lastCleanSearch];
+                    }
+
+                    // Perform Filter (AND logic)
+                    // We check if *every* term exists in the item.norm key
+                    filesToRender = sourceList.filter(f => {
+                        if (!f.norm) return false;
+                        return terms.every(term => f.norm.includes(term));
+                    });
+
+                    this.searchCache[currentCacheKey] = filesToRender;
                 }
 
-                filesToRender = sourceList.filter(f => f.norm && f.norm.includes(cleanSearch));
-
-                this.searchCache[cleanSearch] = filesToRender;
+                this.lastCleanSearch = currentCacheKey;
             }
 
-            this.lastCleanSearch = cleanSearch;
-
         } else if (this.searchTerm && this.searchTerm.length < 3) {
-            // Show all (wait for 3 chars)
+            // Wait for 3 chars total
             filesToRender = this.allFiles;
+            // Reset cache pointer if we drop below threshold to ensure fresh start on re-type?
+            // Actually, clearing lastCleanSearch might be good if we go "indi" -> "in" -> "indi".
+            // "in" triggers this block. "indi" triggers above.
+            // If we don't clear, "indi" startsWith "indi" (from before) -> uses cache. Safe.
         } else {
             filesToRender = this.allFiles;
         }
