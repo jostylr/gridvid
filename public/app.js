@@ -28,12 +28,38 @@ function getQueryParams() {
     };
 }
 
+
 function createEl(tag, className, text = "") {
     const el = document.createElement(tag);
     if (className) el.className = className;
     if (text) el.textContent = text;
     return el;
 }
+
+function setCookie(name, value, days = 365) {
+    const d = new Date();
+    d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
+    let expires = "expires=" + d.toUTCString();
+    document.cookie = name + "=" + JSON.stringify(value) + ";" + expires + ";path=/";
+}
+
+function getCookie(name) {
+    const nameEQ = name + "=";
+    const ca = document.cookie.split(';');
+    for (let i = 0; i < ca.length; i++) {
+        let c = ca[i];
+        while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+        if (c.indexOf(nameEQ) === 0) {
+            try {
+                return JSON.parse(c.substring(nameEQ.length, c.length));
+            } catch (e) {
+                return null;
+            }
+        }
+    }
+    return null;
+}
+
 
 // Component: File Browser Cell
 class FileBrowser {
@@ -274,9 +300,24 @@ class FileBrowser {
         const fsBtn = createEl("button", "fullscreen-btn", "⤢ Full Screen");
         fsBtn.onclick = () => {
             const video = playerContainer.querySelector("video");
-            if (video) {
-                if (video.requestFullscreen) video.requestFullscreen();
-                else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+            if (!video) return;
+
+            // iPhone Safari's "real" video fullscreen API
+            if (video.webkitEnterFullscreen) {
+                video.webkitEnterFullscreen();
+                return;
+            }
+
+            // Standard Fullscreen API (works in many places, incl. iPad)
+            if (video.requestFullscreen) {
+                video.requestFullscreen();
+                return;
+            }
+
+            // Older WebKit-ish Fullscreen API on elements
+            if (video.webkitRequestFullscreen) {
+                video.webkitRequestFullscreen();
+                return;
             }
         };
         playerContainer.appendChild(fsBtn);
@@ -436,20 +477,11 @@ class SettingsManager {
         state.config = newConfig;
 
         try {
-            const res = await fetch("/api/config", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newConfig)
-            });
-            if (!res.ok) throw new Error("Failed to save");
+            // Save to cookie (browser persistence) instead of server
+            setCookie("vidserver_settings", newConfig);
 
-            // Reload page to apply grid changes if needed, or just close
-            // For simplicity, we just close. Grid requires reload to resize usually, 
-            // but we could make it reactive. User requested "Settings button...".
-            // Let's notify user "Saved" or just close.
+            // Reload page to apply logic
             this.closeModal();
-            // Optional: simple alert or toast? 
-            // window.location.reload(); // Reloading is safest for grid changes
             if (confirm("Settings saved. Reload to apply grid changes?")) {
                 window.location.reload();
             }
@@ -463,7 +495,7 @@ class SettingsManager {
 
 // App Init
 async function init() {
-    // 1. Fetch Config
+    // 1. Fetch Server Config (Base Defaults)
     try {
         const res = await fetch("/api/config");
         if (res.ok) state.config = await res.json();
@@ -471,10 +503,34 @@ async function init() {
         console.error("Failed to load config, using defaults", e);
     }
 
+    // 2. Check Cookie (User Overrides)
+    const userSettings = getCookie("vidserver_settings");
+
+    if (userSettings) {
+        // User has explicit preferences saved
+        state.config = { ...state.config, ...userSettings };
+    } else {
+        // 3. Responsive Defaults (No User Preference)
+        // Smartphone (<600) -> 1x1
+        // Tablet (<1024) -> 2x2
+        // Desktop (>=1024) -> 3x3
+        const w = window.innerWidth;
+        if (w < 600) {
+            state.config.defaultRows = 1;
+            state.config.defaultCols = 1;
+        } else if (w < 1200) {
+            state.config.defaultRows = 2;
+            state.config.defaultCols = 2;
+        } else {
+            state.config.defaultRows = 3;
+            state.config.defaultCols = 3;
+        }
+    }
+
     const { rows, cols } = getQueryParams();
-    // Prioritize query params -> config -> default fallback (2)
-    state.rows = rows || state.config.defaultRows || 2;
-    state.cols = cols || state.config.defaultCols || 2;
+    // Prioritize query params -> config (which is either cookie or responsive)
+    state.rows = rows || state.config.defaultRows;
+    state.cols = cols || state.config.defaultCols;
 
     const grid = document.getElementById("app-grid");
 
