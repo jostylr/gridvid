@@ -43,11 +43,17 @@ class FileBrowser {
         this.searchTerm = "";
         this.allFiles = []; // Store for filtering
         this.render();
+
+        // Search Cache for backtracking
+        this.searchCache = {};
+        this.lastCleanSearch = "";
     }
 
     async loadPath(path) {
         this.currentPath = path;
         this.searchTerm = ""; // Reset search on nav
+        this.searchCache = {}; // Reset cache
+        this.lastCleanSearch = "";
         this.updateHeader();
 
         try {
@@ -90,7 +96,7 @@ class FileBrowser {
         input.placeholder = "Search...";
         input.value = this.searchTerm;
         input.oninput = (e) => {
-            this.searchTerm = e.target.value.toLowerCase();
+            this.searchTerm = e.target.value.toLowerCase(); // keep lower for consistency, but matching uses normalized
             this.renderFiles();
         };
         // Stop bubbling so typing doesn't trigger other things
@@ -99,13 +105,20 @@ class FileBrowser {
         searchContainer.appendChild(input);
         header.appendChild(searchContainer);
 
-        // Load catalog if not loaded?
-        // We can do it lazy or global. Let's do it lazy on first focus or just load once globally?
-        // User said "gets loaded".
-        if (!window.fullCatalog) {
+        // Pre-load and Normalize Catalog Lazy
+        if (!window.fullCatalog && !window.catalogLoading) {
+            window.catalogLoading = true;
             fetch("/api/catalog").then(res => res.json()).then(data => {
-                window.fullCatalog = data;
-            }).catch(console.error);
+                const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
+                window.fullCatalog = data.map(f => ({
+                    ...f,
+                    norm: normalize(f.name) + (f.path ? normalize(f.path) : "")
+                }));
+                window.catalogLoading = false;
+            }).catch(e => {
+                console.error("Catalog load failed", e);
+                window.catalogLoading = false;
+            });
         }
     }
 
@@ -132,71 +145,77 @@ class FileBrowser {
         const list = this.container.querySelector(".file-list");
         list.innerHTML = "";
 
-        // Logic:
-        // 1. If searchTerm exists -> Filter window.fullCatalog
-        // 2. If no searchTerm -> Show this.currentDirectoryFiles (we need to preserve folder view)
-
         let filesToRender = [];
 
-        if (this.searchTerm && window.fullCatalog) {
-            // Client-side search with smart matching
-            // 1. Normalize search term: lower case, remove non-alphanumeric
-            const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
+        // Search Logic
+        if (this.searchTerm && this.searchTerm.length >= 3 && window.fullCatalog) {
+            const normalize = (str) => str.replace(/[^a-z0-9]/g, "");
             const cleanSearch = normalize(this.searchTerm);
 
-            filesToRender = window.fullCatalog.filter(f => {
-                // Normalize file name/path
-                const cleanName = normalize(f.name);
-                const cleanPath = f.path ? normalize(f.path) : "";
+            // Check Cache
+            if (this.searchCache[cleanSearch]) {
+                filesToRender = this.searchCache[cleanSearch];
+            } else {
+                // Refine
+                let sourceList = window.fullCatalog;
 
-                return cleanName.includes(cleanSearch) || cleanPath.includes(cleanSearch);
-            });
+                // If extension of last search, use that result as source
+                if (this.lastCleanSearch && cleanSearch.startsWith(this.lastCleanSearch) && this.searchCache[this.lastCleanSearch]) {
+                    sourceList = this.searchCache[this.lastCleanSearch];
+                }
+
+                filesToRender = sourceList.filter(f => f.norm && f.norm.includes(cleanSearch));
+
+                this.searchCache[cleanSearch] = filesToRender;
+            }
+
+            this.lastCleanSearch = cleanSearch;
+
+        } else if (this.searchTerm && this.searchTerm.length < 3) {
+            // Show all (wait for 3 chars)
+            filesToRender = this.allFiles;
         } else {
-            // Standard directory view
             filesToRender = this.allFiles;
         }
 
         if (filesToRender.length === 0) {
-            list.innerHTML = `<div style="padding:20px; opacity:0.5">${this.searchTerm ? "No matches" : "Empty directory"}</div>`;
+            const msg = (this.searchTerm && this.searchTerm.length >= 3) ? "No matches" : "Empty directory";
+            list.innerHTML = `<div style="padding:20px; opacity:0.5">${msg}</div>`;
             return;
         }
 
-        filesToRender.forEach(file => {
+        // Limit rendering for performance
+        const renderSlice = filesToRender.slice(0, 500);
+
+        renderSlice.forEach(file => {
             const item = createEl("div", "file-item");
 
             if (file.type === "directory") {
                 const icon = createEl("div", "folder-icon", ICONS.folder);
                 item.appendChild(icon);
-
-                // Clicking directory in search results -> Jump to directory?
-                // Or just enter it.
                 item.onclick = () => this.loadPath(file.path);
             } else {
-                // Video file
+                // Video
                 const thumbUrl = `/thumbs/${file.path}.jpg`;
                 const thumb = createEl("img", "thumbnail");
                 thumb.src = thumbUrl;
                 thumb.onerror = () => { thumb.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='gray'><rect width='100' height='100'/></svg>"; };
-
                 item.appendChild(thumb);
                 item.onclick = () => this.renderPlayer(file.path);
             }
 
-            // Display Name
-            const displayName = file.name.replace(/\.[^/.]+$/, "");
-            const name = createEl("div", "file-name", displayName);
-            item.appendChild(name);
+            // Display Name (or Path if search)
+            let displayText = file.name.replace(/\.[^/.]+$/, "");
 
-            // Context for search results
-            if (this.searchTerm && file.path !== file.name) {
-                const dir = file.path.split("/").slice(0, -1).join("/");
-                if (dir) {
-                    const sub = createEl("div", "file-name", dir);
-                    sub.style.fontSize = "0.7em";
-                    sub.style.opacity = "0.7";
-                    item.appendChild(sub);
-                }
+            // If performing a deep search, show context (path)
+            if (this.searchTerm && this.searchTerm.length >= 3 && file.path !== file.name) {
+                displayText = file.path;
             }
+
+            const name = createEl("div", "file-name", displayText);
+            // Add title for hover in case of long paths
+            name.title = displayText;
+            item.appendChild(name);
 
             list.appendChild(item);
         });
