@@ -22,9 +22,15 @@ const ICONS = {
 // Utils
 function getQueryParams() {
     const params = new URLSearchParams(window.location.search);
+    const parseBool = (key) => {
+        if (!params.has(key)) return null;
+        return params.get(key) === "true" || params.get(key) === "1";
+    };
     return {
         rows: params.has("rows") ? parseInt(params.get("rows"), 10) : null,
-        cols: params.has("cols") ? parseInt(params.get("cols"), 10) : null
+        cols: params.has("cols") ? parseInt(params.get("cols"), 10) : null,
+        muted: parseBool("muted"),
+        singleAudio: parseBool("singleAudio")
     };
 }
 
@@ -404,11 +410,17 @@ class SettingsManager {
 
         // Footer
         const footer = createEl("div", "modal-footer");
+
+        const resetBtn = createEl("button", "btn btn-danger", "Reset Defaults");
+        resetBtn.style.marginRight = "auto";
+        resetBtn.onclick = () => this.resetSettings();
+
         const saveBtn = createEl("button", "btn btn-primary", "Save");
         saveBtn.onclick = () => this.saveSettings();
         const cancelBtn = createEl("button", "btn btn-secondary", "Cancel");
         cancelBtn.onclick = () => this.closeModal();
 
+        footer.appendChild(resetBtn);
         footer.appendChild(cancelBtn);
         footer.appendChild(saveBtn);
         modal.appendChild(footer);
@@ -458,6 +470,13 @@ class SettingsManager {
 
         row.appendChild(select);
         this.body.appendChild(row);
+    }
+
+    resetSettings() {
+        if (confirm("Reset all settings to server defaults?")) {
+            document.cookie = "vidserver_settings=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            window.location.reload();
+        }
     }
 
     async saveSettings() {
@@ -511,26 +530,33 @@ async function init() {
         state.config = { ...state.config, ...userSettings };
     } else {
         // 3. Responsive Defaults (No User Preference)
-        // Smartphone (<600) -> 1x1
-        // Tablet (<1024) -> 2x2
-        // Desktop (>=1024) -> 3x3
+        // Smartphone (<600) -> small
+        // Tablet (<1200) -> medium
+        // Desktop (>=1200) -> large
+
+        const sizes = state.config.gridSizes || { small: "1x1", medium: "2x2", large: "3x3" };
+        let targetStr = sizes.large;
+
         const w = window.innerWidth;
         if (w < 600) {
-            state.config.defaultRows = 1;
-            state.config.defaultCols = 1;
+            targetStr = sizes.small;
         } else if (w < 1200) {
-            state.config.defaultRows = 2;
-            state.config.defaultCols = 2;
-        } else {
-            state.config.defaultRows = 3;
-            state.config.defaultCols = 3;
+            targetStr = sizes.medium;
         }
+
+        const [r, c] = targetStr.split("x").map(n => parseInt(n, 10));
+        state.config.defaultRows = r;
+        state.config.defaultCols = c;
     }
 
-    const { rows, cols } = getQueryParams();
+    const { rows, cols, muted, singleAudio } = getQueryParams();
     // Prioritize query params -> config (which is either cookie or responsive)
     state.rows = rows || state.config.defaultRows;
     state.cols = cols || state.config.defaultCols;
+
+    // Override config with query params if present
+    if (muted !== null) state.config.defaultMuted = muted;
+    if (singleAudio !== null) state.config.singleAudio = singleAudio;
 
     const grid = document.getElementById("app-grid");
 

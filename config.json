@@ -2,5 +2,10 @@
     "defaultRows": 2,
     "defaultCols": 2,
     "defaultMuted": true,
-    "singleAudio": true
+    "singleAudio": true,
+    "gridSizes": {
+        "small": "1x1",
+        "medium": "2x2",
+        "large": "3x3"
+    }
 }
