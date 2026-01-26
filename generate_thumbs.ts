@@ -3,7 +3,7 @@ import { readdir, stat, mkdir } from "node:fs/promises";
 import { join, relative, dirname, extname, basename } from "node:path";
 import { spawn } from "bun";
 
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm", ".mov", ".avi"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v"]);
 
 async function getDuration(filePath: string): Promise<number> {
   const proc = spawn(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath], {

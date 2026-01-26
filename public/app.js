@@ -3,7 +3,13 @@
 const state = {
     rows: 2,
     cols: 2,
-    activeVideo: null
+    activeVideo: null,
+    config: {
+        defaultRows: 2,
+        defaultCols: 2,
+        defaultMuted: true,
+        singleAudio: true
+    }
 };
 
 // Icons (Simple generic SVG placeholders or emojis)
@@ -17,8 +23,8 @@ const ICONS = {
 function getQueryParams() {
     const params = new URLSearchParams(window.location.search);
     return {
-        rows: parseInt(params.get("rows") || "2", 10),
-        cols: parseInt(params.get("cols") || "2", 10)
+        rows: params.has("rows") ? parseInt(params.get("rows"), 10) : null,
+        cols: params.has("cols") ? parseInt(params.get("cols"), 10) : null
     };
 }
 
@@ -34,18 +40,21 @@ class FileBrowser {
     constructor(containerId) {
         this.currentPath = "";
         this.container = document.getElementById(containerId);
+        this.searchTerm = "";
+        this.allFiles = []; // Store for filtering
         this.render();
     }
 
     async loadPath(path) {
         this.currentPath = path;
+        this.searchTerm = ""; // Reset search on nav
         this.updateHeader();
 
         try {
             const res = await fetch(`/api/list?path=${encodeURIComponent(path)}`);
             if (!res.ok) throw new Error("Failed to load");
-            const files = await res.json();
-            this.renderFiles(files);
+            this.allFiles = await res.json();
+            this.renderFiles();
         } catch (e) {
             console.error(e);
             this.container.querySelector(".file-list").innerHTML = `<div style="padding:20px; color:red">Error loading directory</div>`;
@@ -54,19 +63,49 @@ class FileBrowser {
 
     updateHeader() {
         const header = this.container.querySelector(".path-header");
-        // Show "Root" if empty, otherwise path
-        header.textContent = this.currentPath || "/";
+        header.innerHTML = ""; // Clear
 
-        // Add "Up" button if not root
+        // 1. Up Button
         if (this.currentPath) {
-            const upBtn = createEl("span", "", " ⬆️");
+            const upBtn = createEl("span", "", "⬆️ ");
             upBtn.style.cursor = "pointer";
-            upBtn.style.marginLeft = "10px";
+            upBtn.style.marginRight = "8px";
             upBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.goUp();
             };
             header.appendChild(upBtn);
+        }
+
+        // 2. Path Title
+        const title = createEl("span", "", this.currentPath || "/");
+        title.style.marginRight = "10px";
+        title.style.fontWeight = "bold";
+        header.appendChild(title);
+
+        // 3. Search Bar
+        const searchContainer = createEl("div", "search-container");
+        const input = createEl("input", "search-input");
+        input.type = "text";
+        input.placeholder = "Search...";
+        input.value = this.searchTerm;
+        input.oninput = (e) => {
+            this.searchTerm = e.target.value.toLowerCase();
+            this.renderFiles();
+        };
+        // Stop bubbling so typing doesn't trigger other things
+        input.onclick = (e) => e.stopPropagation();
+
+        searchContainer.appendChild(input);
+        header.appendChild(searchContainer);
+
+        // Load catalog if not loaded?
+        // We can do it lazy or global. Let's do it lazy on first focus or just load once globally?
+        // User said "gets loaded".
+        if (!window.fullCatalog) {
+            fetch("/api/catalog").then(res => res.json()).then(data => {
+                window.fullCatalog = data;
+            }).catch(console.error);
         }
     }
 
@@ -79,7 +118,6 @@ class FileBrowser {
 
     render() {
         this.container.innerHTML = "";
-
         const header = createEl("div", "path-header");
         this.container.appendChild(header);
 
@@ -90,42 +128,75 @@ class FileBrowser {
         this.loadPath("");
     }
 
-    renderFiles(files) {
+    renderFiles() {
         const list = this.container.querySelector(".file-list");
         list.innerHTML = "";
 
-        if (files.length === 0) {
-            list.innerHTML = `<div style="padding:20px; opacity:0.5">Empty directory</div>`;
+        // Logic:
+        // 1. If searchTerm exists -> Filter window.fullCatalog
+        // 2. If no searchTerm -> Show this.currentDirectoryFiles (we need to preserve folder view)
+
+        let filesToRender = [];
+
+        if (this.searchTerm && window.fullCatalog) {
+            // Client-side search with smart matching
+            // 1. Normalize search term: lower case, remove non-alphanumeric
+            const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const cleanSearch = normalize(this.searchTerm);
+
+            filesToRender = window.fullCatalog.filter(f => {
+                // Normalize file name/path
+                const cleanName = normalize(f.name);
+                const cleanPath = f.path ? normalize(f.path) : "";
+
+                return cleanName.includes(cleanSearch) || cleanPath.includes(cleanSearch);
+            });
+        } else {
+            // Standard directory view
+            filesToRender = this.allFiles;
+        }
+
+        if (filesToRender.length === 0) {
+            list.innerHTML = `<div style="padding:20px; opacity:0.5">${this.searchTerm ? "No matches" : "Empty directory"}</div>`;
             return;
         }
 
-        files.forEach(file => {
+        filesToRender.forEach(file => {
             const item = createEl("div", "file-item");
 
             if (file.type === "directory") {
                 const icon = createEl("div", "folder-icon", ICONS.folder);
                 item.appendChild(icon);
 
+                // Clicking directory in search results -> Jump to directory?
+                // Or just enter it.
                 item.onclick = () => this.loadPath(file.path);
             } else {
                 // Video file
-                // Try to find thumbnail
-                // Thumb path logic: /thumbs/path/to/video.mp4.jpg
                 const thumbUrl = `/thumbs/${file.path}.jpg`;
-
                 const thumb = createEl("img", "thumbnail");
                 thumb.src = thumbUrl;
-                thumb.onerror = () => { thumb.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='gray'><rect width='100' height='100'/></svg>"; }; // Fallback
+                thumb.onerror = () => { thumb.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='gray'><rect width='100' height='100'/></svg>"; };
 
                 item.appendChild(thumb);
-
                 item.onclick = () => this.renderPlayer(file.path);
             }
 
-            // Strip extension for display
+            // Display Name
             const displayName = file.name.replace(/\.[^/.]+$/, "");
             const name = createEl("div", "file-name", displayName);
             item.appendChild(name);
+
+            // Context for search results
+            if (this.searchTerm && file.path !== file.name) {
+                const dir = file.path.split("/").slice(0, -1).join("/");
+                if (dir) {
+                    const sub = createEl("div", "file-name", dir);
+                    sub.style.fontSize = "0.7em";
+                    sub.style.opacity = "0.7";
+                    item.appendChild(sub);
+                }
+            }
 
             list.appendChild(item);
         });
@@ -168,7 +239,7 @@ class FileBrowser {
         const video = createEl("video", "");
         video.controls = true;
         video.autoplay = true;
-        video.muted = true; // Default to muted
+        video.muted = state.config.defaultMuted; // Use config
         video.playsInline = true; // Better mobile/safari support
         video.src = `/videos/${encodeURIComponent(path)}`;
 
@@ -211,20 +282,166 @@ class FileBrowser {
 
 // Video Player Logic moved inside FileBrowser class
 
+// Settings Manager Component
+class SettingsManager {
+    constructor() {
+        this.renderBtn();
+        this.renderModal();
+    }
+
+    renderBtn() {
+        // Create floating settings button
+        const btn = createEl("div", "settings-trigger", "⚙️");
+        btn.onclick = () => this.openModal();
+        document.body.appendChild(btn);
+    }
+
+    renderModal() {
+        // Modal structure
+        this.overlay = createEl("div", "modal-overlay");
+        this.overlay.onclick = (e) => {
+            if (e.target === this.overlay) this.closeModal();
+        };
+
+        const modal = createEl("div", "modal");
+        this.overlay.appendChild(modal);
+
+        // Header
+        const header = createEl("div", "modal-header");
+        header.innerHTML = `<span>Settings</span><span class="close-modal">✖</span>`;
+        header.querySelector(".close-modal").onclick = () => this.closeModal();
+        modal.appendChild(header);
+
+        // Body
+        this.body = createEl("div", "modal-body");
+        modal.appendChild(this.body);
+
+        // Footer
+        const footer = createEl("div", "modal-footer");
+        const saveBtn = createEl("button", "btn btn-primary", "Save");
+        saveBtn.onclick = () => this.saveSettings();
+        const cancelBtn = createEl("button", "btn btn-secondary", "Cancel");
+        cancelBtn.onclick = () => this.closeModal();
+
+        footer.appendChild(cancelBtn);
+        footer.appendChild(saveBtn);
+        modal.appendChild(footer);
+
+        document.body.appendChild(this.overlay);
+    }
+
+    openModal() {
+        // Populate inputs with current state
+        this.body.innerHTML = "";
+
+        const cfg = state.config;
+
+        this.addInput("Default Rows", "number", cfg.defaultRows, "defaultRows");
+        this.addInput("Default Cols", "number", cfg.defaultCols, "defaultCols");
+        this.addToggle("Default Start Muted", cfg.defaultMuted, "defaultMuted");
+        this.addToggle("Single Audio Source", cfg.singleAudio, "singleAudio");
+
+        this.overlay.classList.add("active");
+    }
+
+    closeModal() {
+        this.overlay.classList.remove("active");
+    }
+
+    addInput(label, type, value, key) {
+        const group = createEl("div", "form-group");
+        group.innerHTML = `<label>${label}</label>`;
+        const input = createEl("input");
+        input.type = type;
+        input.value = value;
+        input.dataset.key = key;
+        group.appendChild(input);
+        this.body.appendChild(group);
+    }
+
+    addToggle(label, value, key) {
+        const row = createEl("div", "toggle-row");
+        row.style.margin = "10px 0";
+        row.innerHTML = `<label>${label}</label>`;
+
+        const select = createEl("select");
+        select.innerHTML = `<option value="true">On</option><option value="false">Off</option>`;
+        select.value = value.toString();
+        select.dataset.key = key;
+        select.dataset.type = "boolean";
+
+        row.appendChild(select);
+        this.body.appendChild(row);
+    }
+
+    async saveSettings() {
+        const newConfig = { ...state.config };
+
+        const inputs = this.body.querySelectorAll("input, select");
+        inputs.forEach(input => {
+            const key = input.dataset.key;
+            let val = input.value;
+            if (input.type === "number") val = parseInt(val, 10);
+            if (input.dataset.type === "boolean") val = val === "true";
+
+            newConfig[key] = val;
+        });
+
+        // Optimistic update
+        state.config = newConfig;
+
+        try {
+            const res = await fetch("/api/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(newConfig)
+            });
+            if (!res.ok) throw new Error("Failed to save");
+
+            // Reload page to apply grid changes if needed, or just close
+            // For simplicity, we just close. Grid requires reload to resize usually, 
+            // but we could make it reactive. User requested "Settings button...".
+            // Let's notify user "Saved" or just close.
+            this.closeModal();
+            // Optional: simple alert or toast? 
+            // window.location.reload(); // Reloading is safest for grid changes
+            if (confirm("Settings saved. Reload to apply grid changes?")) {
+                window.location.reload();
+            }
+
+        } catch (e) {
+            console.error(e);
+            alert("Error saving settings");
+        }
+    }
+}
+
 // App Init
-function init() {
+async function init() {
+    // 1. Fetch Config
+    try {
+        const res = await fetch("/api/config");
+        if (res.ok) state.config = await res.json();
+    } catch (e) {
+        console.error("Failed to load config, using defaults", e);
+    }
+
     const { rows, cols } = getQueryParams();
-    state.rows = rows;
-    state.cols = cols;
+    // Prioritize query params -> config -> default fallback (2)
+    state.rows = rows || state.config.defaultRows || 2;
+    state.cols = cols || state.config.defaultCols || 2;
 
     const grid = document.getElementById("app-grid");
 
+    // Initialize Settings
+    new SettingsManager();
+
     // Set grid CSS
-    grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    grid.style.gridTemplateRows = `repeat(${state.rows}, 1fr)`;
+    grid.style.gridTemplateColumns = `repeat(${state.cols}, 1fr)`;
 
     // Create cells
-    const totalCells = rows * cols;
+    const totalCells = state.rows * state.cols;
     for (let i = 0; i < totalCells; i++) {
         const cellId = `cell-${i}`;
         const cell = createEl("div", "browser-cell");
@@ -254,11 +471,13 @@ function init() {
         if (e.target.tagName !== "VIDEO") return;
         const current = e.target;
 
-        // Check if any *other* video is playing with sound
-        const othersWithSound = Array.from(document.querySelectorAll("video")).some(v => v !== current && !v.paused && !v.muted);
+        if (state.config.singleAudio) {
+            // Check if any *other* video is already playing with sound
+            const othersWithSound = Array.from(document.querySelectorAll("video")).some(v => v !== current && !v.paused && !v.muted);
 
-        if (othersWithSound) {
-            current.muted = true;
+            if (othersWithSound) {
+                current.muted = true;
+            }
         }
     }, true); // Capture phase to catch it early
 
@@ -266,7 +485,7 @@ function init() {
         if (e.target.tagName !== "VIDEO") return;
         const current = e.target;
 
-        if (!current.muted) {
+        if (!current.muted && state.config.singleAudio) {
             // This video just unmuted (or volume increased), mute everyone else
             document.querySelectorAll("video").forEach(v => {
                 if (v !== current) {

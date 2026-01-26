@@ -1,4 +1,4 @@
-# vidserver
+# Grid Vid
 
 To install dependencies:
 
@@ -54,3 +54,4 @@ Thumbnails: Stored locally in thumbs/ to avoid real-time generation cost.
 NOTE
 
 The server listens on port 8080 by default. If 8080 is in use, it will automatically try port 8081.
+

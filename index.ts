@@ -29,6 +29,8 @@ for (const port of tryPorts) {
                 const url = new URL(req.url);
                 const pathname = url.pathname;
 
+
+
                 // API: List files
                 if (pathname === "/api/list") {
                     const queryPath = url.searchParams.get("path") || "";
@@ -44,7 +46,6 @@ for (const port of tryPorts) {
                         const result = [];
 
                         for (const entry of entries) {
-                            // simple filter, adjust as needed
                             if (entry.name.startsWith(".")) continue;
 
                             if (entry.isDirectory()) {
@@ -55,8 +56,8 @@ for (const port of tryPorts) {
                                 });
                             } else {
                                 const ext = extname(entry.name).toLowerCase();
-                                // Assuming similar extensions as generator
-                                if ([".mp4", ".mkv", ".webm", ".mov", ".avi"].includes(ext)) {
+                                const validExts = [".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v"];
+                                if (validExts.includes(ext)) {
                                     result.push({
                                         name: entry.name,
                                         type: "file",
@@ -78,9 +79,52 @@ for (const port of tryPorts) {
                     }
                 }
 
+                // API: Full Catalog (Recursive List)
+                if (pathname === "/api/catalog") {
+                    try {
+                        const results: any[] = [];
+                        // Helper for recursive search
+                        async function walk(dir: string, root: string) {
+                            const list = await readdir(dir, { withFileTypes: true });
+                            for (const entry of list) {
+                                if (entry.name.startsWith(".")) continue;
+                                const fullPath = join(dir, entry.name);
+                                const relPath = relative(root, fullPath);
+
+                                if (entry.isDirectory()) {
+                                    results.push({
+                                        name: entry.name,
+                                        type: "directory",
+                                        path: relPath
+                                    });
+                                    await walk(fullPath, root);
+                                } else {
+                                    const ext = extname(entry.name).toLowerCase();
+                                    const validExts = [".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v"];
+
+                                    if (validExts.includes(ext)) {
+                                        results.push({
+                                            name: entry.name,
+                                            type: "file",
+                                            path: relPath
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        await walk(ROOT_DIR, ROOT_DIR);
+
+                        return Response.json(results);
+
+                    } catch (e) {
+                        return new Response("Catalog Error", { status: 500 });
+                    }
+                }
+
                 // Serve Thumbnails
                 if (pathname.startsWith("/thumbs/")) {
-                    const filePath = pathname.replace("/thumbs/", "");
+                    const filePath = decodeURIComponent(pathname.replace("/thumbs/", ""));
                     const targetThumb = join(THUMBS_DIR, filePath);
                     if (!isSafePath(targetThumb, THUMBS_DIR)) {
                         return new Response("Forbidden", { status: 403 });
@@ -99,6 +143,36 @@ for (const port of tryPorts) {
                     }
 
                     return new Response(file(targetVideo));
+                }
+
+                // API: Get Config
+                if (pathname === "/api/config" && req.method === "GET") {
+                    try {
+                        const configPath = join(process.cwd(), "config.json");
+                        const configData = await file(configPath).text();
+                        return new Response(configData, { headers: { "Content-Type": "application/json" } });
+                    } catch (e) {
+                        // Fallback defaults if file missing
+                        return Response.json({
+                            defaultRows: 2,
+                            defaultCols: 2,
+                            defaultMuted: true,
+                            singleAudio: true
+                        });
+                    }
+                }
+
+                // API: Update Config
+                if (pathname === "/api/config" && req.method === "POST") {
+                    try {
+                        const body = await req.json();
+                        // Basic validation could go here
+                        const configPath = join(process.cwd(), "config.json");
+                        await Bun.write(configPath, JSON.stringify(body, null, 4));
+                        return Response.json({ success: true });
+                    } catch (e) {
+                        return new Response("Error saving config", { status: 500 });
+                    }
                 }
 
                 // Serve Static Files (Frontend)
@@ -120,6 +194,7 @@ for (const port of tryPorts) {
             console.log(`  ${ip}:${server.port}`);
         }
         break; // Success
+        // Catch-all for other errors
     } catch (e: any) {
         if (e.code === "EADDRINUSE") {
             console.log(`Port ${port} is in use, trying next...`);
