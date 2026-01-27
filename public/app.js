@@ -4,6 +4,7 @@ const state = {
     rows: 2,
     cols: 2,
     activeVideo: null,
+    browsers: {}, // Store instances by cellId
     config: {
         defaultRows: 2,
         defaultCols: 2,
@@ -81,11 +82,15 @@ class FileBrowser {
         this.lastCleanSearch = "";
     }
 
-    async loadPath(path) {
+    async loadPath(path, keepSearch = false) {
         this.currentPath = path;
-        this.searchTerm = ""; // Reset search on nav
-        this.searchCache = {}; // Reset cache
-        this.lastCleanSearch = "";
+
+        if (!keepSearch) {
+            this.searchTerm = ""; // Reset search on nav
+            this.searchCache = {}; // Reset cache
+            this.lastCleanSearch = "";
+        }
+
         this.updateHeader();
 
         try {
@@ -108,9 +113,16 @@ class FileBrowser {
             const upBtn = createEl("span", "", "⬆️ ");
             upBtn.style.cursor = "pointer";
             upBtn.style.marginRight = "8px";
+            upBtn.tabIndex = 0; // Make focusable
+            upBtn.role = "button";
             upBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.goUp();
+            };
+            upBtn.onkeydown = (e) => {
+                if (e.key === "Enter") {
+                    this.goUp();
+                }
             };
             header.appendChild(upBtn);
         }
@@ -128,13 +140,37 @@ class FileBrowser {
         input.placeholder = "Search...";
         input.value = this.searchTerm;
         input.oninput = (e) => {
-            this.searchTerm = e.target.value.toLowerCase(); // keep lower for consistency, but matching uses normalized
+            this.searchTerm = e.target.value.toLowerCase();
             this.renderFiles();
+            const btn = this.container.querySelector(".search-clear");
+            if (btn) btn.style.display = this.searchTerm ? "" : "none";
         };
-        // Stop bubbling so typing doesn't trigger other things
         input.onclick = (e) => e.stopPropagation();
 
+        // Search Key Handling
+        input.onkeydown = (e) => {
+            e.stopPropagation(); // Prevent global handlers when typing
+            if (e.key === "Enter") {
+                // Click the first result
+                const firstItem = this.container.querySelector(".file-item");
+                if (firstItem) firstItem.click();
+            } else if (e.key === "Escape") {
+                // Clear search
+                this.clearSearch();
+                input.blur(); // Remove focus
+            }
+        };
+
+        const clearBtn = createEl("button", "search-clear", "✖");
+        clearBtn.tabIndex = -1; // Skip in tab order, use click or just visually there
+        clearBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.clearSearch();
+        };
+        if (!this.searchTerm) clearBtn.style.display = "none";
+
         searchContainer.appendChild(input);
+        searchContainer.appendChild(clearBtn);
         header.appendChild(searchContainer);
 
         // Pre-load and Normalize Catalog Lazy
@@ -203,7 +239,7 @@ class FileBrowser {
                     let sourceList = window.fullCatalog;
 
                     // Simple Refinement Strategy:
-                    // If currentKey starts with lastKey (e.g. "indi|crus" starts with "indi"), 
+                    // If currentKey starts with lastKey (e.g. "indi|crus" starts with "indi"),
                     // we can filter the subset.
                     // Note: "indi|crus".startsWith("indi") is true.
                     // "indiana".startsWith("indi") is true.
@@ -262,6 +298,14 @@ class FileBrowser {
                 item.onclick = () => this.renderPlayer(file.path);
             }
 
+            // Keyboard support for items
+            item.tabIndex = 0;
+            item.onkeydown = (e) => {
+                if (e.key === "Enter") {
+                    item.click();
+                }
+            };
+
             // Display Name (or Path if search)
             let displayText = file.name.replace(/\.[^/.]+$/, "");
 
@@ -295,11 +339,12 @@ class FileBrowser {
             }
 
             this.container.innerHTML = "";
-            const header = createEl("div", "path-header");
-            this.container.appendChild(header);
-            const list = createEl("div", "file-list");
-            this.container.appendChild(list);
-            this.loadPath(this.currentPath);
+            // Restore view with search preserved
+            this.render();
+            // We need to reload the path but keep search if it was active
+            // render() calls loadPath(""), which is wrong if we want to restore deep state.
+            // Better:
+            this.loadPath(this.currentPath, true);
         };
         playerContainer.appendChild(backBtn);
 
@@ -369,6 +414,15 @@ class FileBrowser {
 
         this.videoPlayer.pause();
         this.videoPlayer.src = ""; // Clear source
+    }
+
+    clearSearch() {
+        this.searchTerm = "";
+        const input = this.container.querySelector(".search-input");
+        if (input) input.value = "";
+        this.renderFiles();
+        const btn = this.container.querySelector(".search-clear");
+        if (btn) btn.style.display = "none";
     }
 }
 
@@ -576,8 +630,36 @@ async function init() {
         grid.appendChild(cell);
 
         // Initialize browser in this cell
-        new FileBrowser(cellId);
+        const browser = new FileBrowser(cellId);
+        state.browsers[cellId] = browser;
     }
+
+    // Global Keyboard Shortcuts
+    document.addEventListener("keydown", (e) => {
+        // Find which cell we are in
+        const cell = e.target.closest(".browser-cell");
+        if (!cell) return;
+
+        const browser = state.browsers[cell.id];
+        if (!browser) return;
+
+        if (e.key === "Escape") {
+            // 1. If Video is open (inline-player-container exists)
+            const player = cell.querySelector(".inline-player-container");
+            if (player) {
+                // Determine logic to close player. 
+                // The back button has the close logic. Let's find and click it?
+                const back = player.querySelector(".back-btn");
+                if (back) back.click();
+                return;
+            }
+
+            // 2. If viewing directory (and not in search input - search input handles its own escape)
+            if (document.activeElement.tagName !== "INPUT") {
+                browser.goUp();
+            }
+        }
+    });
 
     // Close modal on click outside (legacy cleanup, but good to keep if valid)
     const overlay = document.getElementById("video-overlay");

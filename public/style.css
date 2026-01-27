@@ -103,9 +103,14 @@ body {
     transition: background 0.2s, transform 0.2s;
 }
 
-.file-item:hover {
+.file-item:hover,
+.file-item:focus {
     background: var(--hover-bg);
     transform: translateY(-2px);
+    outline: none;
+    /* Remove default browser outline */
+    box-shadow: 0 0 0 2px var(--accent-color);
+    /* Add custom focus ring */
 }
 
 .thumbnail {
@@ -258,6 +263,8 @@ body {
 .search-container {
     flex: 1;
     display: flex;
+    align-items: center;
+    position: relative;
 }
 
 .search-input {
@@ -271,11 +278,36 @@ body {
     font-size: 0.9em;
     outline: none;
     transition: background 0.2s;
+    padding-right: 30px;
+    /* Space for clear button */
 }
 
 .search-input:focus {
     background: rgba(255, 255, 255, 0.15);
     border-color: var(--accent-color);
+}
+
+.search-clear {
+    position: absolute;
+    right: 8px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.6;
+    font-size: 1.2em;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+}
+
+.search-clear:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
 }
 
 /* Settings Button (Fixed or absolute) */
