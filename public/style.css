@@ -163,75 +163,90 @@ body {
     object-fit: contain;
 }
 
-.back-btn {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    background: rgba(0, 0, 0, 0.6);
-    color: white;
+/* Player Header */
+.player-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    /* Similar to path-header */
+    background: rgba(0, 0, 0, 0.8);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+.player-controls-left,
+.player-controls-center,
+.player-controls-right {
+    display: flex;
+    align-items: center;
+    min-width: 80px;
+    /* Ensure space for alignment */
+}
+
+.player-controls-center {
+    justify-content: center;
+    flex: 1;
+}
+
+.player-controls-right {
+    justify-content: flex-end;
+}
+
+/* Updated Player Buttons */
+.back-btn,
+.fullscreen-btn,
+.mute-btn {
+    /* Reset absolute positioning */
+    position: static;
+    background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 8px 12px;
+    color: white;
+    padding: 6px 12px;
     border-radius: 6px;
     cursor: pointer;
-    z-index: 10;
+    font-size: 0.9em;
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.9em;
-    backdrop-filter: blur(4px);
     transition: background 0.2s;
+    /* Remove previous hardcoded positions if they were generic, 
+       but here we override them for the specific context or just generic class? 
+       The previous CSS had them absolute. We can override or replace.
+    */
+    margin: 0;
 }
 
-
-.back-btn:hover {
-    background: rgba(0, 0, 0, 0.8);
-}
-
-.fullscreen-btn {
-    position: absolute;
-    top: 100px;
-    /* Below back button */
-    left: 10px;
-    background: rgba(0, 0, 0, 0.6);
-    color: white;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 8px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    z-index: 10;
-    font-size: 0.9em;
-    backdrop-filter: blur(4px);
-    transition: background 0.2s;
-}
-
-
-.fullscreen-btn:hover {
-    background: rgba(0, 0, 0, 0.8);
-}
-
-.mute-btn {
-    position: absolute;
-    top: 190px;
-    /* Below fullscreen button */
-    left: 10px;
-    background: rgba(0, 0, 0, 0.6);
-    color: white;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 8px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    z-index: 10;
-    font-size: 0.9em;
-    backdrop-filter: blur(4px);
-    transition: background 0.2s;
-    min-width: 110px;
-    /* Consistent width for text change */
-    text-align: center;
-}
-
+.back-btn:hover,
+.fullscreen-btn:hover,
 .mute-btn:hover {
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(255, 255, 255, 0.1);
 }
+
+/* Grid Controls */
+.grid-controls {
+    display: flex;
+    gap: 8px;
+    margin-right: 16px;
+}
+
+.grid-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--glass-border);
+    color: var(--text-color);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.grid-btn:hover {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
 
 
 

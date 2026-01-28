@@ -80,6 +80,8 @@ class FileBrowser {
         // Search Cache for backtracking
         this.searchCache = {};
         this.lastCleanSearch = "";
+
+        this.hasInteracted = false;
     }
 
     async loadPath(path, keepSearch = false) {
@@ -107,6 +109,21 @@ class FileBrowser {
     updateHeader() {
         const header = this.container.querySelector(".path-header");
         header.innerHTML = ""; // Clear
+
+        // 0. Grid Controls (Only if root and no prior interaction)
+        if (!this.currentPath && !this.hasInteracted && window.updateGrid) {
+            const gridControls = createEl("div", "grid-controls");
+            ["1x1", "2x2", "3x3"].forEach(size => {
+                const btn = createEl("div", "grid-btn", size);
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    const [r, c] = size.split("x").map(Number);
+                    window.updateGrid(r, c);
+                };
+                gridControls.appendChild(btn);
+            });
+            header.appendChild(gridControls);
+        }
 
         // 1. Up Button
         if (this.currentPath) {
@@ -140,6 +157,11 @@ class FileBrowser {
         input.placeholder = "Search...";
         input.value = this.searchTerm;
         input.oninput = (e) => {
+            if (!this.hasInteracted) {
+                this.hasInteracted = true;
+                const gridControls = this.container.querySelector(".grid-controls");
+                if (gridControls) gridControls.remove();
+            }
             this.searchTerm = e.target.value.toLowerCase();
             this.renderFiles();
             const btn = this.container.querySelector(".search-clear");
@@ -285,6 +307,7 @@ class FileBrowser {
             const item = createEl("div", "file-item");
 
             const action = () => {
+                this.hasInteracted = true;
                 if (file.type === "directory") {
                     this.loadPath(file.path);
                 } else {
@@ -334,18 +357,25 @@ class FileBrowser {
     }
 
     renderPlayer(path) {
+        this.hasInteracted = true;
         this.container.innerHTML = "";
 
         const playerContainer = createEl("div", "inline-player-container");
 
+        // Controls Header
+        const controls = createEl("div", "player-header");
+        const left = createEl("div", "player-controls-left");
+        const center = createEl("div", "player-controls-center");
+        const right = createEl("div", "player-controls-right");
+
+        // Back Btn
         const backBtn = createEl("button", "back-btn", "⬅ Back");
         backBtn.onclick = () => {
-            // Explicitly clean up video to prevent memory/decoder leaks
             const video = playerContainer.querySelector("video");
             if (video) {
                 video.pause();
-                video.removeAttribute("src"); // Remove src attribute
-                video.load(); // Force release of media resources
+                video.removeAttribute("src");
+                video.load();
             }
 
             this.container.innerHTML = "";
@@ -358,32 +388,37 @@ class FileBrowser {
             // Restore content with preserved search
             this.loadPath(this.currentPath, true);
         };
-        playerContainer.appendChild(backBtn);
+        left.appendChild(backBtn);
 
+        // Fullscreen Btn
         const fsBtn = createEl("button", "fullscreen-btn", "⤢ Full Screen");
         fsBtn.onclick = () => {
             const video = playerContainer.querySelector("video");
             if (!video) return;
 
-            // iPhone Safari's "real" video fullscreen API
             if (video.webkitEnterFullscreen) {
                 video.webkitEnterFullscreen();
                 return;
             }
-
-            // Standard Fullscreen API (works in many places, incl. iPad)
             if (video.requestFullscreen) {
                 video.requestFullscreen();
                 return;
             }
-
-            // Older WebKit-ish Fullscreen API on elements
             if (video.webkitRequestFullscreen) {
                 video.webkitRequestFullscreen();
                 return;
             }
         };
-        playerContainer.appendChild(fsBtn);
+        center.appendChild(fsBtn);
+
+        // Mute Btn
+        const muteBtn = createEl("button", "mute-btn", "🔊 Unmute");
+        right.appendChild(muteBtn);
+
+        controls.appendChild(left);
+        controls.appendChild(center);
+        controls.appendChild(right);
+        playerContainer.appendChild(controls);
 
         const video = createEl("video", "");
         video.controls = true;
@@ -392,12 +427,10 @@ class FileBrowser {
         video.playsInline = true; // Better mobile/safari support
         video.src = `/videos/${encodeURIComponent(path)}`;
 
-        const muteBtn = createEl("button", "mute-btn", "🔊 Unmute");
         muteBtn.onclick = () => {
             video.muted = !video.muted;
             muteBtn.textContent = video.muted ? "🔊 Unmute" : "🔇 Mute";
         };
-        playerContainer.appendChild(muteBtn);
 
         // Sync button if user uses native controls
         video.onvolumechange = () => {
@@ -731,5 +764,40 @@ async function init() {
         }
     });
 }
+
+// Global Grid Update
+window.updateGrid = function (rows, cols) {
+    state.rows = rows;
+    state.cols = cols;
+    const grid = document.getElementById("app-grid");
+    grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+    const currentCells = grid.children.length;
+    const targetCells = rows * cols;
+
+    if (targetCells > currentCells) {
+        for (let i = currentCells; i < targetCells; i++) {
+            const cellId = `cell-${i}`;
+            const cell = createEl("div", "browser-cell");
+            cell.id = cellId;
+            grid.appendChild(cell);
+            const browser = new FileBrowser(cellId);
+            state.browsers[cellId] = browser;
+        }
+    } else if (targetCells < currentCells) {
+        for (let i = currentCells - 1; i >= targetCells; i--) {
+            const cell = document.getElementById(`cell-${i}`);
+            if (cell) {
+                delete state.browsers[`cell-${i}`];
+                cell.remove();
+            }
+        }
+    }
+
+    // Also save to config for persistence during this session (though page reload resets unless saved to cookie/server)
+    state.config.defaultRows = rows;
+    state.config.defaultCols = cols;
+};
 
 window.addEventListener("DOMContentLoaded", init);
