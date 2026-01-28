@@ -284,10 +284,17 @@ class FileBrowser {
         renderSlice.forEach(file => {
             const item = createEl("div", "file-item");
 
+            const action = () => {
+                if (file.type === "directory") {
+                    this.loadPath(file.path);
+                } else {
+                    this.renderPlayer(file.path);
+                }
+            };
+
             if (file.type === "directory") {
                 const icon = createEl("div", "folder-icon", ICONS.folder);
                 item.appendChild(icon);
-                item.onclick = () => this.loadPath(file.path);
             } else {
                 // Video
                 const thumbUrl = `/thumbs/${file.path}.jpg`;
@@ -295,14 +302,17 @@ class FileBrowser {
                 thumb.src = thumbUrl;
                 thumb.onerror = () => { thumb.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='gray'><rect width='100' height='100'/></svg>"; };
                 item.appendChild(thumb);
-                item.onclick = () => this.renderPlayer(file.path);
             }
+
+            item.onclick = action;
 
             // Keyboard support for items
             item.tabIndex = 0;
             item.onkeydown = (e) => {
                 if (e.key === "Enter") {
-                    item.click();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    action();
                 }
             };
 
@@ -339,11 +349,13 @@ class FileBrowser {
             }
 
             this.container.innerHTML = "";
-            // Restore view with search preserved
-            this.render();
-            // We need to reload the path but keep search if it was active
-            // render() calls loadPath(""), which is wrong if we want to restore deep state.
-            // Better:
+            // Manually rebuild UI to avoid render() clearing state
+            const header = createEl("div", "path-header");
+            this.container.appendChild(header);
+            const list = createEl("div", "file-list");
+            this.container.appendChild(list);
+
+            // Restore content with preserved search
             this.loadPath(this.currentPath, true);
         };
         playerContainer.appendChild(backBtn);
@@ -394,6 +406,9 @@ class FileBrowser {
 
         playerContainer.appendChild(video);
         this.container.appendChild(playerContainer);
+
+        // Auto-focus back button so Escape/Keyboard works immediately
+        backBtn.focus();
     }
 
     playVideo(path) {
